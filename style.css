@@ -61,7 +61,7 @@ h1 { font-size: 26px; margin: 0 0 10px; letter-spacing: .5px; }
   -webkit-appearance: none; appearance: none; text-align: right;
 }
 
-.list { padding: 12px 16px; display: grid; gap: 12px; }
+.list { padding: 12px 16px; display: grid; gap: 12px; grid-template-columns: minmax(0, 1fr); }
 .card {
   display: flex; gap: 12px; background: var(--card); border-radius: var(--radius);
   padding: 12px; border: 1px solid var(--line); cursor: pointer;
@@ -71,16 +71,16 @@ h1 { font-size: 26px; margin: 0 0 10px; letter-spacing: .5px; }
   width: 76px; height: 76px; border-radius: 10px; flex: none; object-fit: cover;
   background: var(--accent-soft); display: grid; place-items: center; font-size: 30px;
 }
-.card-main { min-width: 0; flex: 1; }
+.card-main { min-width: 0; flex: 1; overflow: hidden; overflow-wrap: anywhere; word-break: break-word; }
 .card-top { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; }
 .card h2 { font-size: 17px; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .badge { font-size: 12px; padding: 1px 8px; border-radius: 999px; flex: none; }
 .badge.want { background: color-mix(in srgb, var(--want) 18%, transparent); color: var(--want); }
 .badge.visited { background: var(--accent-soft); color: var(--accent); }
-.meta { color: var(--muted); font-size: 13px; margin-top: 2px; }
+.meta { color: var(--muted); font-size: 13px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .star-line { color: var(--star); font-size: 14px; letter-spacing: 1px; }
 .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
-.tag { font-size: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; color: var(--muted); }
+.tag { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; color: var(--muted); }
 .card-actions { margin-top: 6px; display: flex; gap: 14px; }
 .map-link { font-size: 13px; color: var(--accent); text-decoration: none; }
 
@@ -148,3 +148,6 @@ textarea { resize: vertical; }
   position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(96px + var(--safe-b));
   background: var(--ink); color: var(--bg); padding: 8px 16px; border-radius: 999px; font-size: 14px; z-index: 50;
 }
+
+.sheet-body > * { min-width: 0; }
+label { min-width: 0; }

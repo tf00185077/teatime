@@ -96,6 +96,9 @@ function extractUrl(text) {
   const m = String(text || '').match(/https?:\/\/[^\s|<>"']+/i);
   return m ? m[0] : '';
 }
+function stripUrls(text) {
+  return String(text || '').replace(/https?:\/\/\S+/gi, ' ').replace(/\s+/g, ' ').trim();
+}
 function extractUrls(text) {
   return String(text || '').match(/https?:\/\/[^\s|<>"']+/gi) || [];
 }
@@ -117,8 +120,9 @@ function parseIncoming(text) {
   let name = '', area = '', body = raw;
   if (/^teatime\|/i.test(raw)) {
     const parts = raw.split('|').map(x => x.trim());
-    name = parts[1] || '';
-    area = parts[2] || '';
+    // 店名、地區裡如果混進網址就拿掉（避免卡片被長網址撐破）
+    name = stripUrls(parts[1]);
+    area = stripUrls(parts[2]);
     body = parts.slice(3).join('|');
   }
   const urls = extractUrls(body);
@@ -477,6 +481,18 @@ $('#importInput').addEventListener('change', async e => {
 /* ---------- Boot ---------- */
 async function load() {
   shops = await getAll();
+  // 修復舊資料：店名／地區裡混進的網址移除，網址補到來源連結
+  for (const s of shops) {
+    const urls = extractUrls([s.name, s.area].join(' '));
+    if (!urls.length) continue;
+    s.name = stripUrls(s.name).replace(/\|+$/, '').trim() || '未命名（IG 收藏）';
+    s.area = stripUrls(s.area).replace(/\|+$/, '').trim();
+    for (const u of urls) {
+      if (isMapUrl(u)) { if (!s.address) s.address = u; }
+      else if (!s.sourceUrl) s.sourceUrl = normalizeUrl(u);
+    }
+    await put(s);
+  }
   render();
 }
 load();

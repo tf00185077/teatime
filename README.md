@@ -11,7 +11,7 @@
 - 同一家店從 IG 和 Google 地圖各存一次，會自動合併（比對店名／連結）
 
 ## 從 IG / Google 地圖收藏：「加到下午茶」捷徑
-一鍵安裝：https://www.icloud.com/shortcuts/14fbfedaa0a141e98dfcd3fc6a777e60 （app 內「⋯ → ⚡ 安裝捷徑」也是這個連結）
+一鍵安裝：https://www.icloud.com/shortcuts/0cedc3ec903e40419ddaee77cf42a9a7 （app 內「⋯ → ⚡ 安裝捷徑」也是這個連結）
 
 自己從頭做的步驟：
 
