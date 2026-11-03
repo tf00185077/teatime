@@ -131,7 +131,8 @@ function igUsername(u) {
 // 支援：「teatime|店名|地區|分享內容」或任何含有連結的文字。
 // Google 地圖／Apple 地圖連結 → 放進「地址或地圖連結」；其他（IG 等）→ 放進「IG／來源連結」
 function parseIncoming(text) {
-  const raw = String(text || '').trim();
+  // 中文鍵盤常打出全形「｜」或其他直線符號，統一換成半形 |
+  const raw = String(text || '').replace(/[｜│┃∣ǀ丨]/g, '|').trim();
   if (!raw) return null;
   let name = '', area = '', body = raw;
   if (/^teatime\|/i.test(raw)) {
