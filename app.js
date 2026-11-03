@@ -63,6 +63,72 @@ function mapUrl(shop) {
   return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q);
 }
 
+/* ---------- IG / 捷徑 解析 ---------- */
+function isInstagram(u) {
+  return /(^|\.)instagram\.com$/i.test(safeHost(u));
+}
+function safeHost(u) {
+  try { return new URL(u).hostname; } catch { return ''; }
+}
+// 去掉 ?igsh= 之類的追蹤參數，方便判斷重複
+function normalizeUrl(u) {
+  if (!u) return '';
+  try {
+    const url = new URL(u.trim());
+    if (isInstagram(url.href)) {
+      url.search = ''; url.hash = '';
+      url.hostname = 'www.instagram.com';
+      if (!url.pathname.endsWith('/')) url.pathname += '/';
+    }
+    return url.href;
+  } catch { return u.trim(); }
+}
+function extractUrl(text) {
+  const m = String(text || '').match(/https?:\/\/[^\s|<>"']+/i);
+  return m ? m[0] : '';
+}
+// instagram.com/<帳號>/ 這種個人頁連結可以拿到帳號名稱
+function igUsername(u) {
+  try {
+    const url = new URL(u);
+    if (!isInstagram(url.href)) return '';
+    const seg = url.pathname.split('/').filter(Boolean);
+    if (seg.length === 1 && !['p', 'reel', 'reels', 'stories', 'explore', 's'].includes(seg[0])) return seg[0];
+  } catch {}
+  return '';
+}
+// 支援：「teatime|店名|地區|連結」或任何含有連結的文字
+function parseIncoming(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  if (/^teatime\|/i.test(raw)) {
+    const parts = raw.split('|').map(x => x.trim());
+    const rest = parts.slice(3).join('|');
+    const sourceUrl = normalizeUrl(extractUrl(rest) || extractUrl(raw));
+    return {
+      name: parts[1] || igUsername(sourceUrl) || '',
+      area: parts[2] || '',
+      sourceUrl,
+    };
+  }
+  const url = extractUrl(raw);
+  if (!url) return null;
+  const sourceUrl = normalizeUrl(url);
+  const leftover = raw.replace(url, '').trim();
+  return { name: igUsername(sourceUrl), area: '', sourceUrl, notes: leftover.slice(0, 500) };
+}
+function findBySource(u) {
+  const n = normalizeUrl(u);
+  return n ? shops.find(s => normalizeUrl(s.sourceUrl) === n) : null;
+}
+async function readClipboard() {
+  try {
+    return await navigator.clipboard.readText();
+  } catch {
+    return null;
+  }
+}
+
 /* ---------- Render ---------- */
 function render() {
   const q = $('#search').value.trim().toLowerCase();
@@ -75,7 +141,7 @@ function render() {
   let items = shops.filter(s => filter === 'all' || s.status === filter);
   if (q) {
     items = items.filter(s =>
-      [s.name, s.area, s.address, s.notes, ...(s.tags || [])].join(' ').toLowerCase().includes(q));
+      [s.name, s.area, s.address, s.notes, s.sourceUrl, ...(s.tags || [])].join(' ').toLowerCase().includes(q));
   }
   items.sort((a, b) => {
     if (sort === 'rating') return (b.rating || 0) - (a.rating || 0) || b.updatedAt - a.updatedAt;
@@ -108,7 +174,10 @@ function render() {
         ${meta ? `<div class="meta">${meta}</div>` : ''}
         ${stars}
         ${tags}
-        <div class="card-actions"><a class="map-link" href="${esc(mapUrl(s))}" target="_blank" rel="noopener">📍 地圖</a></div>
+        <div class="card-actions">
+          <a class="map-link" href="${esc(mapUrl(s))}" target="_blank" rel="noopener">📍 地圖</a>
+          ${s.sourceUrl ? `<a class="map-link" href="${esc(s.sourceUrl)}" target="_blank" rel="noopener">${isInstagram(s.sourceUrl) ? '📷 IG' : '🔗 來源'}</a>` : ''}
+        </div>
       </div>
     </article>`;
   }).join('');
@@ -132,15 +201,22 @@ function setPhoto(dataUrl) {
   $('#photoHint').hidden = !!currentPhoto;
   $('#photoRemove').hidden = !currentPhoto;
 }
-function openEditor(shop) {
+function openEditor(shop, prefill) {
   form.reset();
   editingId = shop ? shop.id : null;
   $('#editorTitle').textContent = shop ? '編輯店家' : '新增店家';
   $('#deleteBtn').hidden = !shop;
+  if (!shop && prefill) {
+    form.name.value = prefill.name || '';
+    form.area.value = prefill.area || '';
+    form.sourceUrl.value = prefill.sourceUrl || '';
+    form.notes.value = prefill.notes || '';
+  }
   if (shop) {
     form.name.value = shop.name || '';
     form.area.value = shop.area || '';
     form.address.value = shop.address || '';
+    form.sourceUrl.value = shop.sourceUrl || '';
     form.status.value = shop.status || 'want';
     form.visitedAt.value = shop.visitedAt || '';
     form.price.value = shop.price || '';
@@ -217,6 +293,7 @@ form.addEventListener('submit', async e => {
     name,
     area: form.area.value.trim(),
     address: form.address.value.trim(),
+    sourceUrl: normalizeUrl(form.sourceUrl.value),
     status,
     rating: status === 'visited' ? currentRating : 0,
     visitedAt: status === 'visited' ? form.visitedAt.value : '',
@@ -241,6 +318,50 @@ $('#deleteBtn').addEventListener('click', async () => {
   await load();
   editor.close();
   toast('已刪除');
+});
+
+/* 從剪貼簿新增（搭配 IG「複製連結」或「存到下午茶」捷徑） */
+$('#pasteBtn').addEventListener('click', async () => {
+  const text = await readClipboard();
+  if (text == null) { toast('無法讀取剪貼簿，請在欄位裡長按貼上'); openEditor(null); return; }
+  const data = parseIncoming(text);
+  if (!data) { toast('剪貼簿裡沒有連結'); return; }
+  const existing = findBySource(data.sourceUrl);
+  if (existing) { toast('這家已經收藏過了'); openEditor(existing); return; }
+  openEditor(null, data);
+  if (!data.name) setTimeout(() => form.name.focus(), 300);
+});
+$('#pasteSourceBtn').addEventListener('click', async () => {
+  const text = await readClipboard();
+  const url = extractUrl(text);
+  if (!url) { toast(text == null ? '無法讀取剪貼簿，請長按欄位貼上' : '剪貼簿裡沒有連結'); return; }
+  form.sourceUrl.value = normalizeUrl(url);
+});
+
+/* 匯入捷徑收件匣：每行一筆「teatime|店名|地區|連結」 */
+$('#inboxInput').addEventListener('change', async e => {
+  const f = e.target.files[0];
+  e.target.value = '';
+  if (!f) return;
+  const lines = (await f.text()).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+  let added = 0, skipped = 0;
+  for (const line of lines) {
+    const d = parseIncoming(line);
+    if (!d || !d.sourceUrl) continue;
+    if (findBySource(d.sourceUrl)) { skipped++; continue; }
+    const now = Date.now();
+    const shop = {
+      id: uid(), name: d.name || '未命名（IG 收藏）', area: d.area || '', address: '',
+      sourceUrl: d.sourceUrl, status: 'want', rating: 0, visitedAt: '', price: '',
+      tags: [], notes: d.notes || '', photo: null, createdAt: now, updatedAt: now + added,
+    };
+    await put(shop);
+    shops.push(shop);
+    added++;
+  }
+  await load();
+  menu.close();
+  toast(`新增 ${added} 筆${skipped ? `，略過重複 ${skipped} 筆` : ''}`);
 });
 
 /* Menu, export, import */

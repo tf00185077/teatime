@@ -18,7 +18,10 @@
   <header class="top">
     <div class="title-row">
       <h1>下午茶筆記</h1>
-      <button class="icon-btn" id="menuBtn" aria-label="選單">⋯</button>
+      <div class="head-actions">
+        <button class="chip-btn" id="pasteBtn" aria-label="從剪貼簿新增">📋 貼上</button>
+        <button class="icon-btn" id="menuBtn" aria-label="選單">⋯</button>
+      </div>
     </div>
     <input id="search" type="search" placeholder="搜尋店名、地區、標籤…" autocomplete="off">
     <div class="tabs" role="tablist">
@@ -57,6 +60,12 @@
         <label>店名 *<input name="name" required maxlength="80"></label>
         <label>地區<input name="area" placeholder="例：大安區、中山站" maxlength="40"></label>
         <label>地址或地圖連結<input name="address" maxlength="300"></label>
+        <label>IG／來源連結
+          <span class="input-row">
+            <input name="sourceUrl" type="url" inputmode="url" placeholder="https://www.instagram.com/p/…" maxlength="500">
+            <button type="button" class="chip-btn" id="pasteSourceBtn">貼上</button>
+          </span>
+        </label>
 
         <div class="seg" role="radiogroup">
           <label><input type="radio" name="status" value="want" checked><span>想去</span></label>
@@ -85,6 +94,8 @@
       <button type="button" class="link" data-close>完成</button>
     </div>
     <div class="sheet-body">
+      <label class="menu-item">📥 匯入捷徑收件匣（teatime-inbox.txt）<input type="file" id="inboxInput" accept=".txt,text/plain" hidden></label>
+      <p class="hint">用「存到下午茶」捷徑收藏的店會累積在 iCloud 雲碟的 Shortcuts/teatime-inbox.txt，從這裡一次匯入，重複的連結會自動略過。</p>
       <button class="menu-item" id="exportBtn">匯出備份（JSON）</button>
       <label class="menu-item">匯入備份<input type="file" id="importInput" accept="application/json,.json" hidden></label>
       <p class="hint">資料只存在這台裝置的瀏覽器裡。iOS 可能清除很久沒開的網站資料，建議定期匯出備份。</p>

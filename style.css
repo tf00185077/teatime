@@ -38,6 +38,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .title-row { display: flex; align-items: center; justify-content: space-between; }
 h1 { font-size: 26px; margin: 0 0 10px; letter-spacing: .5px; }
 .icon-btn { background: none; border: 0; font-size: 26px; padding: 0 6px; color: var(--muted); }
+.head-actions { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+.chip-btn {
+  border: 1px solid var(--line); background: var(--card); color: var(--accent);
+  border-radius: 999px; padding: 5px 12px; font-size: 14px; white-space: nowrap; flex: none;
+}
+.input-row { display: flex; gap: 8px; align-items: center; }
+.input-row input { flex: 1; min-width: 0; }
 #search {
   width: 100%; padding: 10px 14px; border-radius: 12px;
   border: 1px solid var(--line); background: var(--card); outline: none;
@@ -74,7 +81,7 @@ h1 { font-size: 26px; margin: 0 0 10px; letter-spacing: .5px; }
 .star-line { color: var(--star); font-size: 14px; letter-spacing: 1px; }
 .tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .tag { font-size: 12px; background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 0 6px; color: var(--muted); }
-.card-actions { margin-top: 6px; }
+.card-actions { margin-top: 6px; display: flex; gap: 14px; }
 .map-link { font-size: 13px; color: var(--accent); text-decoration: none; }
 
 .empty { text-align: center; color: var(--muted); margin-top: 80px; }
