@@ -141,6 +141,7 @@ function parseIncoming(text) {
     photo = base64ToDataUrl(im[1]);
     body = body.replace(im[0], ' ');
   }
+  body = body.replace(/(^|[\s|])img:\s*(?=$|[\s|])/gi, ' '); // 沒找到截圖時留下的空標記
   const urls = extractUrls(body);
   if (!urls.length && !photo) return null;
   let address = '', sourceUrl = '';
