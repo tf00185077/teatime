@@ -143,12 +143,14 @@ function parseIncoming(text) {
   }
   // 捷徑附上的截圖：img:<base64> 或 data:image/...;base64,<base64>
   let photo = null;
-  const im = body.match(/(?:img:|data:image\/[a-z0-9.+-]+;base64,)\s*([A-Za-z0-9+/=\s]{200,})/i);
+  // 容錯：img 後面可接全形冒號；沒有 img 標記但有一大段 Base64 也當作截圖
+  const im = body.match(/(?:img\s*[:：]|data:image\/[a-z0-9.+-]+;base64,)\s*([A-Za-z0-9+/=\s]{200,})/i)
+    || body.match(/(?:^|\|)\s*((?:\/9j\/|iVBOR)[A-Za-z0-9+/=\s]{1000,})/);
   if (im) {
     photo = base64ToDataUrl(im[1]);
     body = body.replace(im[0], ' ');
   }
-  body = body.replace(/(^|[\s|])img:\s*(?=$|[\s|])/gi, ' '); // 沒找到截圖時留下的空標記
+  body = body.replace(/(^|[\s|])img\s*[:：]?\s*(?=$|[\s|])/gi, ' '); // 沒找到截圖時留下的空標記
   const urls = extractUrls(body);
   if (!urls.length && !photo) return null;
   let address = '', sourceUrl = '';
