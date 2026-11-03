@@ -56,11 +56,20 @@ function toast(msg) {
 function parseTags(s) {
   return [...new Set(String(s || '').split(/[\s,，、]+/).map(x => x.replace(/^#/, '').trim()).filter(Boolean))];
 }
+// 有地圖連結就直接開；否則用「店名 + 地址（沒有就用地區）」在 Google 地圖搜尋
 function mapUrl(shop) {
   const a = (shop.address || '').trim();
   if (/^https?:\/\//i.test(a)) return a;
-  const q = [shop.name, a].filter(Boolean).join(' ');
+  const q = [shop.name, a || shop.area].filter(Boolean).join(' ');
   return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(q);
+}
+function isMapUrl(u) {
+  const h = safeHost(u);
+  let p = '';
+  try { p = new URL(u).pathname; } catch {}
+  return /^maps\.app\.goo\.gl$/i.test(h) || /^maps\.apple\.com$/i.test(h) ||
+    (/^goo\.gl$/i.test(h) && p.startsWith('/maps')) ||
+    (/(^|\.)google\.[a-z.]+$/i.test(h) && (p.startsWith('/maps') || /^maps\./i.test(h)));
 }
 
 /* ---------- IG / 捷徑 解析 ---------- */
@@ -87,6 +96,9 @@ function extractUrl(text) {
   const m = String(text || '').match(/https?:\/\/[^\s|<>"']+/i);
   return m ? m[0] : '';
 }
+function extractUrls(text) {
+  return String(text || '').match(/https?:\/\/[^\s|<>"']+/gi) || [];
+}
 // instagram.com/<帳號>/ 這種個人頁連結可以拿到帳號名稱
 function igUsername(u) {
   try {
@@ -97,29 +109,48 @@ function igUsername(u) {
   } catch {}
   return '';
 }
-// 支援：「teatime|店名|地區|連結」或任何含有連結的文字
+// 支援：「teatime|店名|地區|分享內容」或任何含有連結的文字。
+// Google 地圖／Apple 地圖連結 → 放進「地址或地圖連結」；其他（IG 等）→ 放進「IG／來源連結」
 function parseIncoming(text) {
   const raw = String(text || '').trim();
   if (!raw) return null;
+  let name = '', area = '', body = raw;
   if (/^teatime\|/i.test(raw)) {
     const parts = raw.split('|').map(x => x.trim());
-    const rest = parts.slice(3).join('|');
-    const sourceUrl = normalizeUrl(extractUrl(rest) || extractUrl(raw));
-    return {
-      name: parts[1] || igUsername(sourceUrl) || '',
-      area: parts[2] || '',
-      sourceUrl,
-    };
+    name = parts[1] || '';
+    area = parts[2] || '';
+    body = parts.slice(3).join('|');
   }
-  const url = extractUrl(raw);
-  if (!url) return null;
-  const sourceUrl = normalizeUrl(url);
-  const leftover = raw.replace(url, '').trim();
-  return { name: igUsername(sourceUrl), area: '', sourceUrl, notes: leftover.slice(0, 500) };
+  const urls = extractUrls(body);
+  if (!urls.length) return null;
+  let address = '', sourceUrl = '';
+  for (const u of urls) {
+    if (isMapUrl(u)) { if (!address) address = u; }
+    else if (!sourceUrl) sourceUrl = normalizeUrl(u);
+  }
+  // 從 Google 地圖分享時通常會附上店名，拿來當預設店名
+  let leftover = body;
+  urls.forEach(u => { leftover = leftover.replace(u, ' '); });
+  leftover = leftover.replace(/\s+/g, ' ').trim();
+  if (!name && address && leftover) name = leftover.split(/[\n·,，]/)[0].trim().slice(0, 80);
+  if (!name) name = igUsername(sourceUrl);
+  const notes = !address && leftover && leftover !== name ? leftover.slice(0, 500) : '';
+  return { name, area, address, sourceUrl, notes };
 }
 function findBySource(u) {
   const n = normalizeUrl(u);
   return n ? shops.find(s => normalizeUrl(s.sourceUrl) === n) : null;
+}
+function findByAddress(u) {
+  return u ? shops.find(s => (s.address || '').trim() === u.trim()) : null;
+}
+function findByName(name) {
+  const n = String(name || '').trim().toLowerCase();
+  return n ? shops.find(s => s.name.trim().toLowerCase() === n) : null;
+}
+// 找同一家店：同 IG 連結、同地圖連結，或同店名
+function findMatch(d) {
+  return (d.sourceUrl && findBySource(d.sourceUrl)) || (d.address && findByAddress(d.address)) || findByName(d.name);
 }
 async function readClipboard() {
   try {
@@ -209,6 +240,7 @@ function openEditor(shop, prefill) {
   if (!shop && prefill) {
     form.name.value = prefill.name || '';
     form.area.value = prefill.area || '';
+    form.address.value = prefill.address || '';
     form.sourceUrl.value = prefill.sourceUrl || '';
     form.notes.value = prefill.notes || '';
   }
@@ -326,16 +358,33 @@ $('#pasteBtn').addEventListener('click', async () => {
   if (text == null) { toast('無法讀取剪貼簿，請在欄位裡長按貼上'); openEditor(null); return; }
   const data = parseIncoming(text);
   if (!data) { toast('剪貼簿裡沒有連結'); return; }
-  const existing = findBySource(data.sourceUrl);
-  if (existing) { toast('這家已經收藏過了'); openEditor(existing); return; }
+  const existing = findMatch(data);
+  if (existing) {
+    // 同一家店：把新的連結補進去（按儲存才會寫入）
+    openEditor(existing);
+    let filled = false;
+    if (data.address && !existing.address) { form.address.value = data.address; filled = true; }
+    if (data.sourceUrl && !existing.sourceUrl) { form.sourceUrl.value = data.sourceUrl; filled = true; }
+    toast(filled ? '已收藏過，補上新連結，按儲存即可' : '這家已經收藏過了');
+    return;
+  }
   openEditor(null, data);
   if (!data.name) setTimeout(() => form.name.focus(), 300);
 });
-$('#pasteSourceBtn').addEventListener('click', async () => {
+async function pasteUrlInto(field, pick) {
   const text = await readClipboard();
-  const url = extractUrl(text);
-  if (!url) { toast(text == null ? '無法讀取剪貼簿，請長按欄位貼上' : '剪貼簿裡沒有連結'); return; }
-  form.sourceUrl.value = normalizeUrl(url);
+  if (text == null) { toast('無法讀取剪貼簿，請長按欄位貼上'); return; }
+  const urls = extractUrls(text);
+  const url = urls.find(pick) || urls[0];
+  if (!url) { toast('剪貼簿裡沒有連結'); return; }
+  form[field].value = field === 'sourceUrl' ? normalizeUrl(url) : url;
+}
+$('#pasteSourceBtn').addEventListener('click', () => pasteUrlInto('sourceUrl', u => !isMapUrl(u)));
+$('#pasteMapBtn').addEventListener('click', () => pasteUrlInto('address', isMapUrl));
+$('#openMapBtn').addEventListener('click', () => {
+  const s = { name: form.name.value.trim(), address: form.address.value.trim(), area: form.area.value.trim() };
+  if (!s.name && !s.address) { toast('先填店名或地址'); return; }
+  window.open(mapUrl(s), '_blank');
 });
 
 /* 匯入捷徑收件匣：每行一筆「teatime|店名|地區|連結」 */
@@ -343,15 +392,34 @@ $('#inboxInput').addEventListener('change', async e => {
   const f = e.target.files[0];
   e.target.value = '';
   if (!f) return;
-  const lines = (await f.text()).split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-  let added = 0, skipped = 0;
+  // 一筆可能跨多行（Google 地圖分享會有「店名⏎連結」），以 teatime| 開頭切分
+  const lines = [];
+  for (const l of (await f.text()).split(/\r?\n/).map(x => x.trim()).filter(Boolean)) {
+    if (/^teatime\|/i.test(l) || !lines.length) lines.push(l);
+    else lines[lines.length - 1] += '\n' + l;
+  }
+  let added = 0, skipped = 0, merged = 0;
   for (const line of lines) {
     const d = parseIncoming(line);
-    if (!d || !d.sourceUrl) continue;
-    if (findBySource(d.sourceUrl)) { skipped++; continue; }
+    if (!d) continue;
+    const match = findMatch(d);
+    if (match) {
+      // 同一家店：只補空白的連結／地區，不覆蓋原本的資料
+      const patch = {};
+      if (d.address && !match.address) patch.address = d.address;
+      if (d.sourceUrl && !match.sourceUrl) patch.sourceUrl = d.sourceUrl;
+      if (d.area && !match.area) patch.area = d.area;
+      if (Object.keys(patch).length) {
+        Object.assign(match, patch, { updatedAt: Date.now() });
+        await put(match);
+        merged++;
+      } else skipped++;
+      continue;
+    }
     const now = Date.now();
     const shop = {
-      id: uid(), name: d.name || '未命名（IG 收藏）', area: d.area || '', address: '',
+      id: uid(), name: d.name || (d.address ? '未命名（地圖收藏）' : '未命名（IG 收藏）'),
+      area: d.area || '', address: d.address || '',
       sourceUrl: d.sourceUrl, status: 'want', rating: 0, visitedAt: '', price: '',
       tags: [], notes: d.notes || '', photo: null, createdAt: now, updatedAt: now + added,
     };
@@ -361,7 +429,7 @@ $('#inboxInput').addEventListener('change', async e => {
   }
   await load();
   menu.close();
-  toast(`新增 ${added} 筆${skipped ? `，略過重複 ${skipped} 筆` : ''}`);
+  toast([`新增 ${added} 筆`, merged ? `補上連結 ${merged} 筆` : '', skipped ? `略過重複 ${skipped} 筆` : ''].filter(Boolean).join('，'));
 });
 
 /* Menu, export, import */
