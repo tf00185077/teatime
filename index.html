@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f6efe6">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="下午茶">
+  <title>下午茶筆記</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <link rel="icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header class="top">
+    <div class="title-row">
+      <h1>下午茶筆記</h1>
+      <button class="icon-btn" id="menuBtn" aria-label="選單">⋯</button>
+    </div>
+    <input id="search" type="search" placeholder="搜尋店名、地區、標籤…" autocomplete="off">
+    <div class="tabs" role="tablist">
+      <button class="tab active" data-filter="all">全部 <span id="cAll"></span></button>
+      <button class="tab" data-filter="want">想去 <span id="cWant"></span></button>
+      <button class="tab" data-filter="visited">去過 <span id="cVisited"></span></button>
+      <select id="sort" aria-label="排序">
+        <option value="updated">最近更新</option>
+        <option value="rating">評分高→低</option>
+        <option value="name">店名</option>
+      </select>
+    </div>
+  </header>
+
+  <main id="list" class="list"></main>
+  <p id="empty" class="empty" hidden>還沒有紀錄<br>按右下角 ＋ 新增第一家店</p>
+
+  <button class="fab" id="addBtn" aria-label="新增">＋</button>
+
+  <!-- 新增 / 編輯 -->
+  <dialog id="editor" class="sheet">
+    <form id="form" method="dialog">
+      <div class="sheet-head">
+        <button type="button" class="link" id="cancelBtn">取消</button>
+        <strong id="editorTitle">新增店家</strong>
+        <button type="submit" class="link strong">儲存</button>
+      </div>
+      <div class="sheet-body">
+        <label class="photo-pick" id="photoPick">
+          <img id="photoPreview" alt="" hidden>
+          <span id="photoHint">＋ 加照片</span>
+          <input type="file" id="photoInput" accept="image/*" hidden>
+        </label>
+        <button type="button" class="link danger small" id="photoRemove" hidden>移除照片</button>
+
+        <label>店名 *<input name="name" required maxlength="80"></label>
+        <label>地區<input name="area" placeholder="例：大安區、中山站" maxlength="40"></label>
+        <label>地址或地圖連結<input name="address" maxlength="300"></label>
+
+        <div class="seg" role="radiogroup">
+          <label><input type="radio" name="status" value="want" checked><span>想去</span></label>
+          <label><input type="radio" name="status" value="visited"><span>去過</span></label>
+        </div>
+
+        <div class="visited-only">
+          <div class="field-label">評分</div>
+          <div class="stars" id="stars"></div>
+          <label>造訪日期<input type="date" name="visitedAt"></label>
+        </div>
+
+        <label>每人大約價位<input name="price" inputmode="numeric" placeholder="例：450"></label>
+        <label>標籤（用空白或逗號分隔）<input name="tags" placeholder="甜點 司康 安靜 可插座"></label>
+        <label>筆記<textarea name="notes" rows="4" placeholder="推薦餐點、氣氛、要不要訂位…"></textarea></label>
+
+        <button type="button" class="danger-btn" id="deleteBtn" hidden>刪除這家店</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- 選單 -->
+  <dialog id="menu" class="sheet small-sheet">
+    <div class="sheet-head">
+      <span></span><strong>選單</strong>
+      <button type="button" class="link" data-close>完成</button>
+    </div>
+    <div class="sheet-body">
+      <button class="menu-item" id="exportBtn">匯出備份（JSON）</button>
+      <label class="menu-item">匯入備份<input type="file" id="importInput" accept="application/json,.json" hidden></label>
+      <p class="hint">資料只存在這台裝置的瀏覽器裡。iOS 可能清除很久沒開的網站資料，建議定期匯出備份。</p>
+    </div>
+  </dialog>
+
+  <div id="toast" class="toast" hidden></div>
+  <script src="app.js"></script>
+</body>
+</html>
