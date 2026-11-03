@@ -96,6 +96,15 @@ function extractUrl(text) {
   const m = String(text || '').match(/https?:\/\/[^\s|<>"']+/i);
   return m ? m[0] : '';
 }
+function base64ToDataUrl(b64) {
+  const clean = String(b64).replace(/\s+/g, '');
+  const mime = clean.startsWith('/9j/') ? 'image/jpeg'
+    : clean.startsWith('iVBOR') ? 'image/png'
+    : clean.startsWith('R0lG') ? 'image/gif'
+    : clean.startsWith('UklG') ? 'image/webp'
+    : 'image/heic';
+  return `data:${mime};base64,${clean}`;
+}
 function stripUrls(text) {
   return String(text || '').replace(/https?:\/\/\S+/gi, ' ').replace(/\s+/g, ' ').trim();
 }
@@ -125,8 +134,15 @@ function parseIncoming(text) {
     area = stripUrls(parts[2]);
     body = parts.slice(3).join('|');
   }
+  // 捷徑附上的截圖：img:<base64> 或 data:image/...;base64,<base64>
+  let photo = null;
+  const im = body.match(/(?:img:|data:image\/[a-z0-9.+-]+;base64,)\s*([A-Za-z0-9+/=\s]{200,})/i);
+  if (im) {
+    photo = base64ToDataUrl(im[1]);
+    body = body.replace(im[0], ' ');
+  }
   const urls = extractUrls(body);
-  if (!urls.length) return null;
+  if (!urls.length && !photo) return null;
   let address = '', sourceUrl = '';
   for (const u of urls) {
     if (isMapUrl(u)) { if (!address) address = u; }
@@ -139,7 +155,7 @@ function parseIncoming(text) {
   if (!name && address && leftover) name = leftover.split(/[\n·,，]/)[0].trim().slice(0, 80);
   if (!name) name = igUsername(sourceUrl);
   const notes = !address && leftover && leftover !== name ? leftover.slice(0, 500) : '';
-  return { name, area, address, sourceUrl, notes };
+  return { name, area, address, sourceUrl, notes, photo };
 }
 function findBySource(u) {
   const n = normalizeUrl(u);
@@ -260,7 +276,7 @@ function openEditor(shop, prefill) {
     form.notes.value = shop.notes || '';
   }
   currentRating = shop ? shop.rating || 0 : 0;
-  setPhoto(shop ? shop.photo : null);
+  setPhoto(shop ? shop.photo : (prefill && prefill.photo) || null);
   renderStars();
   syncStatus();
   editor.showModal();
@@ -270,9 +286,21 @@ function openEditor(shop, prefill) {
 async function resizeImage(file, max = 1200, quality = 0.82) {
   const url = URL.createObjectURL(file);
   try {
+    return await resizeFromSrc(url, max, quality);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+// 捷徑傳來的截圖再壓一次，避免資料庫太肥；失敗就回傳 null
+async function shrinkDataUrl(dataUrl, max = 1200, quality = 0.8) {
+  if (!dataUrl) return null;
+  try { return await resizeFromSrc(dataUrl, max, quality); } catch { return null; }
+}
+async function resizeFromSrc(src, max, quality) {
+  {
     const img = await new Promise((res, rej) => {
       const i = new Image();
-      i.onload = () => res(i); i.onerror = rej; i.src = url;
+      i.onload = () => res(i); i.onerror = rej; i.src = src;
     });
     const scale = Math.min(1, max / Math.max(img.width, img.height));
     const c = document.createElement('canvas');
@@ -280,8 +308,6 @@ async function resizeImage(file, max = 1200, quality = 0.82) {
     c.height = Math.round(img.height * scale);
     c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
     return c.toDataURL('image/jpeg', quality);
-  } finally {
-    URL.revokeObjectURL(url);
   }
 }
 
@@ -362,6 +388,7 @@ $('#pasteBtn').addEventListener('click', async () => {
   if (text == null) { toast('無法讀取剪貼簿，請在欄位裡長按貼上'); openEditor(null); return; }
   const data = parseIncoming(text);
   if (!data) { toast('剪貼簿裡沒有連結'); return; }
+  if (data.photo) data.photo = await shrinkDataUrl(data.photo);
   const existing = findMatch(data);
   if (existing) {
     // 同一家店：把新的連結補進去（按儲存才會寫入）
@@ -369,6 +396,7 @@ $('#pasteBtn').addEventListener('click', async () => {
     let filled = false;
     if (data.address && !existing.address) { form.address.value = data.address; filled = true; }
     if (data.sourceUrl && !existing.sourceUrl) { form.sourceUrl.value = data.sourceUrl; filled = true; }
+    if (data.photo && !existing.photo) { setPhoto(data.photo); filled = true; }
     toast(filled ? '已收藏過，補上新連結，按儲存即可' : '這家已經收藏過了');
     return;
   }
@@ -406,6 +434,7 @@ $('#inboxInput').addEventListener('change', async e => {
   for (const line of lines) {
     const d = parseIncoming(line);
     if (!d) continue;
+    if (d.photo) d.photo = await shrinkDataUrl(d.photo);
     const match = findMatch(d);
     if (match) {
       // 同一家店：只補空白的連結／地區，不覆蓋原本的資料
@@ -413,6 +442,7 @@ $('#inboxInput').addEventListener('change', async e => {
       if (d.address && !match.address) patch.address = d.address;
       if (d.sourceUrl && !match.sourceUrl) patch.sourceUrl = d.sourceUrl;
       if (d.area && !match.area) patch.area = d.area;
+      if (d.photo && !match.photo) patch.photo = d.photo;
       if (Object.keys(patch).length) {
         Object.assign(match, patch, { updatedAt: Date.now() });
         await put(match);
@@ -425,7 +455,7 @@ $('#inboxInput').addEventListener('change', async e => {
       id: uid(), name: d.name || (d.address ? '未命名（地圖收藏）' : '未命名（IG 收藏）'),
       area: d.area || '', address: d.address || '',
       sourceUrl: d.sourceUrl, status: 'want', rating: 0, visitedAt: '', price: '',
-      tags: [], notes: d.notes || '', photo: null, createdAt: now, updatedAt: now + added,
+      tags: [], notes: d.notes || '', photo: d.photo || null, createdAt: now, updatedAt: now + added,
     };
     await put(shop);
     shops.push(shop);
