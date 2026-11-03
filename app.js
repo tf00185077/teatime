@@ -47,11 +47,18 @@ function uid() {
 function esc(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
-function toast(msg) {
+function toast(msg, ms = 1800) {
   const t = $('#toast');
   t.textContent = msg; t.hidden = false;
   clearTimeout(toast._t);
-  toast._t = setTimeout(() => (t.hidden = true), 1800);
+  toast._t = setTimeout(() => (t.hidden = true), ms);
+}
+// 貼上失敗時，顯示剪貼簿裡實際的內容，方便排查捷徑設定
+function clipDiag(text) {
+  const t = String(text || '');
+  if (!t.trim()) return '剪貼簿是空的，或放的是圖片不是文字。請確認捷徑「拷貝到剪貼板」拷貝的是「文字」';
+  const head = t.slice(0, 40).replace(/\s+/g, ' ');
+  return `剪貼簿裡沒有連結（${t.length} 字，開頭：「${head}…」）`;
 }
 function parseTags(s) {
   return [...new Set(String(s || '').split(/[\s,，、]+/).map(x => x.replace(/^#/, '').trim()).filter(Boolean))];
@@ -388,7 +395,7 @@ $('#pasteBtn').addEventListener('click', async () => {
   const text = await readClipboard();
   if (text == null) { toast('無法讀取剪貼簿，請在欄位裡長按貼上'); openEditor(null); return; }
   const data = parseIncoming(text);
-  if (!data) { toast('剪貼簿裡沒有連結'); return; }
+  if (!data) { toast(clipDiag(text), 6000); return; }
   if (data.photo) data.photo = await shrinkDataUrl(data.photo);
   const existing = findMatch(data);
   if (existing) {

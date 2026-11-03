@@ -146,7 +146,7 @@ textarea { resize: vertical; }
 
 .toast {
   position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(96px + var(--safe-b));
-  background: var(--ink); color: var(--bg); padding: 8px 16px; border-radius: 999px; font-size: 14px; z-index: 50;
+  background: var(--ink); color: var(--bg); padding: 8px 16px; border-radius: 16px; font-size: 14px; z-index: 50; max-width: calc(100vw - 32px); width: max-content; text-align: center; overflow-wrap: anywhere;
 }
 
 .sheet-body > * { min-width: 0; }
