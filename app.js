@@ -112,6 +112,12 @@ function base64ToDataUrl(b64) {
     : 'image/heic';
   return `data:${mime};base64,${clean}`;
 }
+// 清掉 AI 回應常見的雜訊：引號、括號、「無／未知／N/A」、換行
+function cleanField(text) {
+  let t = String(text || '').replace(/[`"“”「」『』]/g, '').replace(/\s+/g, ' ').trim();
+  if (/^(無|没有|沒有|未知|不明|n\/?a|none|null|-|—|不確定)$/i.test(t)) t = '';
+  return t.slice(0, 120);
+}
 function stripUrls(text) {
   return String(text || '').replace(/https?:\/\/\S+/gi, ' ').replace(/\s+/g, ' ').trim();
 }
@@ -134,14 +140,25 @@ function parseIncoming(text) {
   // 中文鍵盤常打出全形「｜」或其他直線符號，統一換成半形 |
   const raw = String(text || '').replace(/[｜│┃∣ǀ丨]/g, '|').trim();
   if (!raw) return null;
-  let name = '', area = '', body = raw;
+  let name = '', area = '', addrText = '', body = raw;
   if (/^teatime\|/i.test(raw)) {
     const parts = raw.split('|').map(x => x.trim());
     // 店名、地區裡如果混進網址就拿掉（避免卡片被長網址撐破）
-    name = stripUrls(parts[1]);
-    area = stripUrls(parts[2]);
-    body = parts.slice(3).join('|');
+    name = cleanField(stripUrls(parts[1]));
+    area = cleanField(stripUrls(parts[2]));
+    // 自動版捷徑：teatime|店名|地區|地址|分享網址|img:…
+    // 第 4 格沒有網址、也不是圖片標記，就當成文字地址
+    const p3 = parts[3] || '';
+    if (parts.length >= 5 && !extractUrls(p3).length && !/^(img\s*[:：]|data:image)/i.test(p3) && p3.length < 200) {
+      addrText = cleanField(p3);
+      body = parts.slice(4).join('|');
+    } else {
+      body = parts.slice(3).join('|');
+    }
   }
+  // 也接受 addr:地址 標記
+  const am = body.match(/(?:^|\|)\s*addr\s*[:：]([^|]*)/i);
+  if (am) { if (!addrText) addrText = cleanField(am[1]); body = body.replace(am[0], ' '); }
   // 捷徑附上的截圖：img:<base64> 或 data:image/...;base64,<base64>
   let photo = null;
   // 容錯：img 後面可接全形冒號；沒有 img 標記但有一大段 Base64 也當作截圖
@@ -153,16 +170,16 @@ function parseIncoming(text) {
   }
   body = body.replace(/(^|[\s|])img\s*[:：]?\s*(?=$|[\s|])/gi, ' '); // 沒找到截圖時留下的空標記
   const urls = extractUrls(body);
-  if (!urls.length && !photo) return null;
-  let address = '', sourceUrl = '';
+  if (!urls.length && !photo && !name) return null;
+  let address = addrText, sourceUrl = '';
   for (const u of urls) {
-    if (isMapUrl(u)) { if (!address) address = u; }
+    if (isMapUrl(u)) { if (!address || address === addrText) address = u; }
     else if (!sourceUrl) sourceUrl = normalizeUrl(u);
   }
   // 從 Google 地圖分享時通常會附上店名，拿來當預設店名
   let leftover = body;
   urls.forEach(u => { leftover = leftover.replace(u, ' '); });
-  leftover = leftover.replace(/\s+/g, ' ').trim();
+  leftover = leftover.replace(/[|\s]+/g, ' ').trim();
   if (!name && address && leftover) name = leftover.split(/[\n·,，]/)[0].trim().slice(0, 80);
   if (!name) name = igUsername(sourceUrl);
   const notes = !address && leftover && leftover !== name ? leftover.slice(0, 500) : '';
