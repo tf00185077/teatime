@@ -651,8 +651,9 @@ $('#geocodeBtn').addEventListener('click', async () => {
 });
 
 /* ---------- 地圖 ---------- */
-const TILE_URL = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
-const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>';
+// OpenStreetMap 官方圖磚：免金鑰，需標示來源
+const TILE_URL = 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>';
 const TAIPEI = [25.0418, 121.5436];
 let map = null, markerLayer = null, meMarker = null, fittedOnce = false;
 
@@ -662,7 +663,7 @@ function pinIcon(cls, emoji) {
 function ensureMap() {
   if (map || typeof L === 'undefined') return;
   map = L.map('map', { zoomControl: false }).setView(TAIPEI, 12);
-  L.tileLayer(TILE_URL, { attribution: TILE_ATTR, maxZoom: 19, subdomains: 'abcd' }).addTo(map);
+  L.tileLayer(TILE_URL, { attribution: TILE_ATTR, maxZoom: 19 }).addTo(map);
   markerLayer = L.layerGroup().addTo(map);
   map.on('popupopen', e => {
     const el = e.popup.getElement();
@@ -769,7 +770,7 @@ $('#pickLocBtn').addEventListener('click', () => {
   picker.showModal();
   if (!pickMap) {
     pickMap = L.map('pickMap').setView(TAIPEI, 13);
-    L.tileLayer(TILE_URL, { attribution: TILE_ATTR, maxZoom: 19, subdomains: 'abcd' }).addTo(pickMap);
+    L.tileLayer(TILE_URL, { attribution: TILE_ATTR, maxZoom: 19 }).addTo(pickMap);
     pickMap.on('click', e => placePick(e.latlng.lat, e.latlng.lng));
   }
   setTimeout(() => {

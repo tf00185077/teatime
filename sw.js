@@ -1,5 +1,5 @@
 // 更新程式後，把版本號 +1，手機重新打開 app 就會抓新版
-const CACHE = 'tea-notes-v12';
+const CACHE = 'tea-notes-v13';
 const ASSETS = [
   './',
   './index.html',
