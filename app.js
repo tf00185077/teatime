@@ -93,6 +93,7 @@ function normalizeUrl(u) {
     const url = new URL(u.trim());
     if (isInstagram(url.href)) {
       url.search = ''; url.hash = '';
+      url.pathname = url.pathname.replace(/\/embed(\/captioned)?\/?$/i, '/');
       url.hostname = 'www.instagram.com';
       if (!url.pathname.endsWith('/')) url.pathname += '/';
     }
@@ -140,9 +141,11 @@ function parseIncoming(text) {
   // 中文鍵盤常打出全形「｜」或其他直線符號，統一換成半形 |
   const raw = String(text || '').replace(/[｜│┃∣ǀ丨]/g, '|').trim();
   if (!raw) return null;
-  let name = '', area = '', addrText = '', body = raw;
+  let name = '', area = '', addrText = '', body = raw, strayUrls = [];
   if (/^teatime\|/i.test(raw)) {
     const parts = raw.split('|').map(x => x.trim());
+    // 網址被放錯格（例如放進店名）時先記下來，後面當來源連結用
+    strayUrls = [parts[1], parts[2]].flatMap(extractUrls);
     // 店名、地區裡如果混進網址就拿掉（避免卡片被長網址撐破）
     name = cleanField(stripUrls(parts[1]));
     area = cleanField(stripUrls(parts[2]));
@@ -169,7 +172,8 @@ function parseIncoming(text) {
     body = body.replace(im[0], ' ');
   }
   body = body.replace(/(^|[\s|])img\s*[:：]?\s*(?=$|[\s|])/gi, ' '); // 沒找到截圖時留下的空標記
-  const urls = extractUrls(body);
+  let urls = extractUrls(body);
+  if (!urls.length && strayUrls.length) urls = strayUrls;
   if (!urls.length && !photo && !name) return null;
   let address = addrText, sourceUrl = '';
   for (const u of urls) {
