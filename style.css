@@ -176,6 +176,7 @@ body.map-mode .fab { bottom: calc(24px + var(--safe-b)); }
 .pin.want { background: var(--want); }
 .pin.visited { background: var(--accent); }
 .pin.pick { background: #3b7dd8; }
+.pin.approx { opacity: .55; border-style: dashed; }
 .me-dot { width: 16px; height: 16px; border-radius: 50%; background: #3b7dd8; border: 3px solid #fff; box-shadow: 0 0 0 6px rgba(59,125,216,.25); }
 .leaflet-popup-content { margin: 10px 12px; font-family: inherit; }
 .pop h3 { margin: 0 0 2px; font-size: 15px; color: #3b2a20; }

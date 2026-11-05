@@ -36,6 +36,7 @@ let editingId = null;
 let currentPhoto = null; // data URL
 let currentRating = 0;
 let currentLat = null, currentLng = null; // 編輯中店家的位置
+let currentGeo = { source: '', approx: false };
 let viewMode = 'list';
 
 const $ = s => document.querySelector(s);
@@ -331,7 +332,8 @@ function openEditor(shop, prefill) {
   }
   currentRating = shop ? shop.rating || 0 : 0;
   const src = shop || prefill || {};
-  setLoc(hasCoord(src) ? src.lat : null, hasCoord(src) ? src.lng : null);
+  setLoc(hasCoord(src) ? src.lat : null, hasCoord(src) ? src.lng : null,
+    shop ? { source: shop.geoSource || '', approx: !!shop.geoApprox } : { source: 'exact', approx: false });
   setPhoto(shop ? shop.photo : (prefill && prefill.photo) || null);
   renderStars();
   syncStatus();
@@ -420,6 +422,7 @@ form.addEventListener('submit', async e => {
     notes: form.notes.value.trim(),
     photo: currentPhoto,
     lat: currentLat, lng: currentLng,
+    geoSource: currentLat == null ? '' : currentGeo.source, geoApprox: currentLat != null && !!currentGeo.approx, geoV: 2,
     geoFailed: currentLat == null ? !!(prev && prev.geoFailed && prev.name === name && prev.address === form.address.value.trim()) : false,
     createdAt: prev ? prev.createdAt : Date.now(),
     updatedAt: Date.now(),
@@ -456,7 +459,7 @@ $('#pasteBtn').addEventListener('click', async () => {
     if (data.address && !existing.address) { form.address.value = data.address; filled = true; }
     if (data.sourceUrl && !existing.sourceUrl) { form.sourceUrl.value = data.sourceUrl; filled = true; }
     if (data.photo && !existing.photo) { setPhoto(data.photo); filled = true; }
-    if (hasCoord(data) && !hasCoord(existing)) { setLoc(data.lat, data.lng); filled = true; }
+    if (hasCoord(data) && !hasCoord(existing)) { setLoc(data.lat, data.lng, { source: 'exact' }); filled = true; }
     toast(filled ? '已收藏過，補上新連結，按儲存即可' : '這家已經收藏過了');
     return;
   }
@@ -503,7 +506,7 @@ $('#inboxInput').addEventListener('change', async e => {
       if (d.sourceUrl && !match.sourceUrl) patch.sourceUrl = d.sourceUrl;
       if (d.area && !match.area) patch.area = d.area;
       if (d.photo && !match.photo) patch.photo = d.photo;
-      if (hasCoord(d) && !hasCoord(match)) { patch.lat = d.lat; patch.lng = d.lng; patch.geoFailed = false; }
+      if (hasCoord(d) && (!hasCoord(match) || match.geoApprox)) { Object.assign(patch, { lat: d.lat, lng: d.lng, geoFailed: false, geoApprox: false, geoSource: 'exact', geoV: 2 }); }
       if (Object.keys(patch).length) {
         Object.assign(match, patch, { updatedAt: Date.now() });
         await put(match);
@@ -517,7 +520,8 @@ $('#inboxInput').addEventListener('change', async e => {
       area: d.area || '', address: d.address || '',
       sourceUrl: d.sourceUrl, status: 'want', rating: 0, visitedAt: '', price: '',
       tags: [], notes: d.notes || '', photo: d.photo || null,
-      lat: hasCoord(d) ? d.lat : null, lng: hasCoord(d) ? d.lng : null, createdAt: now, updatedAt: now + added,
+      lat: hasCoord(d) ? d.lat : null, lng: hasCoord(d) ? d.lng : null,
+      geoSource: hasCoord(d) ? 'exact' : '', geoApprox: false, geoV: 2, createdAt: now, updatedAt: now + added,
     };
     await put(shop);
     shops.push(shop);
@@ -573,25 +577,30 @@ $('#importInput').addEventListener('change', async e => {
 
 
 /* ---------- 位置：編輯畫面 ---------- */
-function setLoc(lat, lng) {
+function setLoc(lat, lng, meta) {
   currentLat = validCoord(lat, lng) ? Number(lat) : null;
   currentLng = currentLat == null ? null : Number(lng);
+  currentGeo = { source: '', approx: false, ...(meta || {}) };
   const el = $('#locStatus');
   if (!el) return;
-  el.classList.toggle('ok', currentLat != null);
-  el.textContent = currentLat != null ? `位置：已設定 ✓（${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}）` : '位置：未設定（儲存後會自動定位）';
+  el.classList.toggle('ok', currentLat != null && !currentGeo.approx);
+  el.textContent = currentLat == null ? '位置：未設定（儲存後會自動定位）'
+    : currentGeo.approx ? '位置：大概位置 ⚠︎（建議按「在地圖上選」確認）'
+    : `位置：已設定 ✓（${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}）`;
 }
 
 /* ---------- 地址 → 座標（OpenStreetMap Nominatim，免費、每秒最多 1 次） ---------- */
 let lastGeoAt = 0;
-async function geocodeQuery(q) {
+// box = [西經, 北緯, 東經, 南緯]：只在這個範圍內找（避免同名店跑到別的城市）
+async function geocodeQuery(q, box) {
   q = String(q || '').trim();
   if (!q) return null;
   const wait = Math.max(0, lastGeoAt + 1100 - Date.now());
   if (wait) await new Promise(r => setTimeout(r, wait));
   lastGeoAt = Date.now();
   try {
-    const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=tw&accept-language=zh-TW&q=' + encodeURIComponent(q);
+    let url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=tw&accept-language=zh-TW&q=' + encodeURIComponent(q);
+    if (box) url += '&bounded=1&viewbox=' + box.map(n => n.toFixed(4)).join(',');
     const res = await fetch(url, { headers: { Accept: 'application/json' } });
     if (!res.ok) return null;
     const j = await res.json();
@@ -600,14 +609,38 @@ async function geocodeQuery(q) {
     return validCoord(lat, lng) ? { lat, lng } : null;
   } catch { return null; }
 }
+const areaCache = {};
+async function geocodeArea(area) {
+  const key = String(area || '').trim();
+  if (!key) return null;
+  if (!(key in areaCache)) areaCache[key] = await geocodeQuery(key);
+  return areaCache[key];
+}
+function boxAround(c, d = 0.06) { // 約 ±6 公里
+  return [c.lng - d, c.lat + d, c.lng + d, c.lat - d];
+}
+// 回傳 { lat, lng, approx }；approx = 只找到地區中心
 async function geocodeShop(s) {
   const fromUrl = coordsFromUrl(s.address);
-  if (fromUrl) return fromUrl;
+  if (fromUrl) return { ...fromUrl, approx: false };
   const addr = /^https?:\/\//i.test(s.address || '') ? '' : (s.address || '').trim();
-  const tries = [...new Set([addr, [s.name, s.area].filter(Boolean).join(' '), s.name].filter(Boolean))];
-  for (const q of tries) {
-    const c = await geocodeQuery(q);
-    if (c) return c;
+  const area = (s.area || '').trim();
+  const ac = area ? await geocodeArea(area) : null;
+  // 1. 有地址：用地址（有地區就限制在地區附近，避免同名路跑掉）
+  if (addr) {
+    const c = (ac && await geocodeQuery(addr, boxAround(ac, 0.15))) || (!ac && await geocodeQuery(addr));
+    if (c) return { ...c, approx: false };
+  }
+  // 2. 有地區：只在地區附近找店名；找不到就放在地區中心
+  if (ac) {
+    const c = await geocodeQuery(s.name, boxAround(ac));
+    if (c) return { ...c, approx: false };
+    return { ...ac, approx: true };
+  }
+  // 3. 只有店名：可能有同名店，標成大概位置請使用者確認
+  if (!area) {
+    const c = await geocodeQuery(s.name);
+    if (c) return { ...c, approx: true };
   }
   return null;
 }
@@ -627,8 +660,9 @@ async function runGeoQueue() {
       const c = await geocodeShop(s);
       const cur = shops.find(x => x.id === id); // 期間可能被編輯過
       if (cur && !hasCoord(cur)) {
-        if (c) { cur.lat = c.lat; cur.lng = c.lng; cur.geoFailed = false; }
+        if (c) { cur.lat = c.lat; cur.lng = c.lng; cur.geoFailed = false; cur.geoApprox = !!c.approx; cur.geoSource = 'auto'; }
         else cur.geoFailed = true;
+        cur.geoV = 2;
         await put(cur);
       }
     }
@@ -646,7 +680,7 @@ $('#geocodeBtn').addEventListener('click', async () => {
   btn.disabled = true; btn.textContent = '定位中…';
   const c = await geocodeShop(s);
   btn.disabled = false; btn.textContent = '自動定位';
-  if (c) { setLoc(c.lat, c.lng); toast('已找到位置，可按「在地圖上選」確認'); }
+  if (c) { setLoc(c.lat, c.lng, { source: 'auto', approx: c.approx }); toast(c.approx ? '只找到大概位置，請按「在地圖上選」確認' : '已找到位置，可按「在地圖上選」確認'); }
   else toast('找不到，請改用「在地圖上選」或補上地址');
 });
 
@@ -691,12 +725,13 @@ function renderMap() {
       <h3>${esc(s.name)}</h3>
       <div class="meta">${esc([s.area, visited ? '去過' : '想去', s.price ? `約 $${s.price}` : ''].filter(Boolean).join(' · '))}</div>
       ${stars}
+      ${s.geoApprox ? '<div class="meta">⚠︎ 大概位置，點「編輯 →在地圖上選」修正</div>' : ''}
       <div class="pop-actions">
         <a href="${esc(mapUrl(s))}" target="_blank" rel="noopener">📍 Google 地圖</a>
         ${s.sourceUrl ? `<a href="${esc(s.sourceUrl)}" target="_blank" rel="noopener">${isInstagram(s.sourceUrl) ? '📷 IG' : '🔗 來源'}</a>` : ''}
         <button type="button" data-edit="${esc(s.id)}">✏️ 編輯</button>
       </div></div>`;
-    L.marker([s.lat, s.lng], { icon: pinIcon(visited ? 'visited' : 'want', visited ? '☕' : '♡') })
+    L.marker([s.lat, s.lng], { icon: pinIcon((visited ? 'visited' : 'want') + (s.geoApprox ? ' approx' : ''), visited ? '☕' : '♡') })
       .bindPopup(html, { maxWidth: 240, minWidth: 180 }).addTo(markerLayer);
     pts.push([s.lat, s.lng]);
   }
@@ -712,13 +747,13 @@ function updateGeoBar() {
   if (viewMode !== 'map') { bar.hidden = true; return; }
   const items = filteredForMap();
   const missing = items.filter(s => !hasCoord(s));
-  const failed = missing.filter(s => s.geoFailed);
+  const failed = missing.filter(s => s.geoFailed).concat(items.filter(s => hasCoord(s) && s.geoApprox));
   if (geoRunning) {
     bar.hidden = false;
     bar.textContent = `正在定位店家… ${geoDone}/${geoTotal}`;
   } else if (failed.length) {
     bar.hidden = false;
-    bar.innerHTML = `${failed.length} 家找不到位置，點店名手動設定：` +
+    bar.innerHTML = `${failed.length} 家位置不確定或找不到，點店名修正：` +
       failed.slice(0, 8).map(s => `<button type="button" data-fix="${esc(s.id)}">${esc(s.name)}</button>`).join('、') +
       (failed.length > 8 ? '…' : '');
     bar.querySelectorAll('[data-fix]').forEach(b => (b.onclick = () => openEditor(shops.find(x => x.id === b.dataset.fix))));
@@ -792,7 +827,7 @@ function placePick(lat, lng) {
 $('#pickCancel').addEventListener('click', () => picker.close());
 $('#pickOk').addEventListener('click', () => {
   if (!pickLL) { toast('先點地圖放一個圖釘'); return; }
-  setLoc(pickLL.lat, pickLL.lng);
+  setLoc(pickLL.lat, pickLL.lng, { source: 'manual', approx: false });
   picker.close();
 });
 
@@ -811,7 +846,19 @@ async function load() {
     }
     await put(s);
   }
+  // 舊版自動定位可能把同名店定到別的城市：清掉重新定位（手動選的、地圖連結帶的不動）
+  const redo = [];
+  for (const s of shops) {
+    if (hasCoord(s) && !s.geoV && !s.geoSource && !coordsFromUrl(s.address)) {
+      s.lat = null; s.lng = null; s.geoFailed = false; s.geoV = 2;
+      await put(s);
+      redo.push(s.id);
+    } else if (s.geoFailed && !s.geoV) {
+      s.geoFailed = false; s.geoV = 2; await put(s); redo.push(s.id);
+    }
+  }
   render();
+  if (redo.length) queueGeocode(redo);
 }
 load();
 
