@@ -35,6 +35,8 @@ let filter = 'all';
 let editingId = null;
 let currentPhoto = null; // data URL
 let currentRating = 0;
+let currentLat = null, currentLng = null; // 編輯中店家的位置
+let viewMode = 'list';
 
 const $ = s => document.querySelector(s);
 const listEl = $('#list');
@@ -159,6 +161,10 @@ function parseIncoming(text) {
       body = parts.slice(3).join('|');
     }
   }
+  // 捷徑可附 geo:緯度,經度
+  let lat = null, lng = null;
+  const gm = body.match(/(?:^|\|)\s*geo\s*[:：]\s*(-?\d+(?:\.\d+)?)\s*[,，]\s*(-?\d+(?:\.\d+)?)/i);
+  if (gm) { lat = Number(gm[1]); lng = Number(gm[2]); body = body.replace(gm[0], ' '); }
   // 也接受 addr:地址 標記
   const am = body.match(/(?:^|\|)\s*addr\s*[:：]([^|]*)/i);
   if (am) { if (!addrText) addrText = cleanField(am[1]); body = body.replace(am[0], ' '); }
@@ -187,8 +193,23 @@ function parseIncoming(text) {
   if (!name && address && leftover) name = leftover.split(/[\n·,，]/)[0].trim().slice(0, 80);
   if (!name) name = igUsername(sourceUrl);
   const notes = !address && leftover && leftover !== name ? leftover.slice(0, 500) : '';
-  return { name, area, address, sourceUrl, notes, photo };
+  if (lat == null && address) { const c = coordsFromUrl(address); if (c) ({ lat, lng } = c); }
+  return { name, area, address, sourceUrl, notes, photo, lat, lng };
 }
+// 從 Google / Apple 地圖的長網址取出座標（短網址 maps.app.goo.gl 取不到）
+function coordsFromUrl(u) {
+  const s = String(u || '');
+  const m = s.match(/!3d(-?\d+\.\d+)!4d(-?\d+\.\d+)/) ||
+    s.match(/[?&](?:q|query|ll|center|destination)=(-?\d+\.\d+)(?:,|%2C)(-?\d+\.\d+)/i) ||
+    s.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/);
+  if (!m) return null;
+  const lat = Number(m[1]), lng = Number(m[2]);
+  return validCoord(lat, lng) ? { lat, lng } : null;
+}
+function validCoord(lat, lng) {
+  return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && !(lat === 0 && lng === 0);
+}
+function hasCoord(s) { return s && validCoord(s.lat, s.lng); }
 function findBySource(u) {
   const n = normalizeUrl(u);
   return n ? shops.find(s => normalizeUrl(s.sourceUrl) === n) : null;
@@ -221,6 +242,7 @@ function render() {
   $('#cWant').textContent = shops.filter(s => s.status === 'want').length || '';
   $('#cVisited').textContent = shops.filter(s => s.status === 'visited').length || '';
 
+  if (viewMode === 'map') { $('#empty').hidden = true; renderMap(); return; }
   let items = shops.filter(s => filter === 'all' || s.status === filter);
   if (q) {
     items = items.filter(s =>
@@ -308,6 +330,8 @@ function openEditor(shop, prefill) {
     form.notes.value = shop.notes || '';
   }
   currentRating = shop ? shop.rating || 0 : 0;
+  const src = shop || prefill || {};
+  setLoc(hasCoord(src) ? src.lat : null, hasCoord(src) ? src.lng : null);
   setPhoto(shop ? shop.photo : (prefill && prefill.photo) || null);
   renderStars();
   syncStatus();
@@ -395,6 +419,8 @@ form.addEventListener('submit', async e => {
     tags: parseTags(form.tags.value),
     notes: form.notes.value.trim(),
     photo: currentPhoto,
+    lat: currentLat, lng: currentLng,
+    geoFailed: currentLat == null ? !!(prev && prev.geoFailed && prev.name === name && prev.address === form.address.value.trim()) : false,
     createdAt: prev ? prev.createdAt : Date.now(),
     updatedAt: Date.now(),
   };
@@ -402,6 +428,7 @@ form.addEventListener('submit', async e => {
   await load();
   editor.close();
   toast(prev ? '已更新' : '已新增');
+  if (!hasCoord(shop) && !shop.geoFailed) queueGeocode([shop.id]);
 });
 
 $('#deleteBtn').addEventListener('click', async () => {
@@ -429,6 +456,7 @@ $('#pasteBtn').addEventListener('click', async () => {
     if (data.address && !existing.address) { form.address.value = data.address; filled = true; }
     if (data.sourceUrl && !existing.sourceUrl) { form.sourceUrl.value = data.sourceUrl; filled = true; }
     if (data.photo && !existing.photo) { setPhoto(data.photo); filled = true; }
+    if (hasCoord(data) && !hasCoord(existing)) { setLoc(data.lat, data.lng); filled = true; }
     toast(filled ? '已收藏過，補上新連結，按儲存即可' : '這家已經收藏過了');
     return;
   }
@@ -475,6 +503,7 @@ $('#inboxInput').addEventListener('change', async e => {
       if (d.sourceUrl && !match.sourceUrl) patch.sourceUrl = d.sourceUrl;
       if (d.area && !match.area) patch.area = d.area;
       if (d.photo && !match.photo) patch.photo = d.photo;
+      if (hasCoord(d) && !hasCoord(match)) { patch.lat = d.lat; patch.lng = d.lng; patch.geoFailed = false; }
       if (Object.keys(patch).length) {
         Object.assign(match, patch, { updatedAt: Date.now() });
         await put(match);
@@ -487,7 +516,8 @@ $('#inboxInput').addEventListener('change', async e => {
       id: uid(), name: d.name || (d.address ? '未命名（地圖收藏）' : '未命名（IG 收藏）'),
       area: d.area || '', address: d.address || '',
       sourceUrl: d.sourceUrl, status: 'want', rating: 0, visitedAt: '', price: '',
-      tags: [], notes: d.notes || '', photo: d.photo || null, createdAt: now, updatedAt: now + added,
+      tags: [], notes: d.notes || '', photo: d.photo || null,
+      lat: hasCoord(d) ? d.lat : null, lng: hasCoord(d) ? d.lng : null, createdAt: now, updatedAt: now + added,
     };
     await put(shop);
     shops.push(shop);
@@ -495,6 +525,7 @@ $('#inboxInput').addEventListener('change', async e => {
   }
   await load();
   menu.close();
+  queueGeocode(shops.filter(x => !hasCoord(x) && !x.geoFailed).map(x => x.id));
   toast([`新增 ${added} 筆`, merged ? `補上連結 ${merged} 筆` : '', skipped ? `略過重複 ${skipped} 筆` : ''].filter(Boolean).join('，'));
 });
 
@@ -538,6 +569,230 @@ $('#importInput').addEventListener('change', async e => {
   } catch {
     toast('匯入失敗：檔案格式不對');
   }
+});
+
+
+/* ---------- 位置：編輯畫面 ---------- */
+function setLoc(lat, lng) {
+  currentLat = validCoord(lat, lng) ? Number(lat) : null;
+  currentLng = currentLat == null ? null : Number(lng);
+  const el = $('#locStatus');
+  if (!el) return;
+  el.classList.toggle('ok', currentLat != null);
+  el.textContent = currentLat != null ? `位置：已設定 ✓（${currentLat.toFixed(4)}, ${currentLng.toFixed(4)}）` : '位置：未設定（儲存後會自動定位）';
+}
+
+/* ---------- 地址 → 座標（OpenStreetMap Nominatim，免費、每秒最多 1 次） ---------- */
+let lastGeoAt = 0;
+async function geocodeQuery(q) {
+  q = String(q || '').trim();
+  if (!q) return null;
+  const wait = Math.max(0, lastGeoAt + 1100 - Date.now());
+  if (wait) await new Promise(r => setTimeout(r, wait));
+  lastGeoAt = Date.now();
+  try {
+    const url = 'https://nominatim.openstreetmap.org/search?format=jsonv2&limit=1&countrycodes=tw&accept-language=zh-TW&q=' + encodeURIComponent(q);
+    const res = await fetch(url, { headers: { Accept: 'application/json' } });
+    if (!res.ok) return null;
+    const j = await res.json();
+    if (!j.length) return null;
+    const lat = Number(j[0].lat), lng = Number(j[0].lon);
+    return validCoord(lat, lng) ? { lat, lng } : null;
+  } catch { return null; }
+}
+async function geocodeShop(s) {
+  const fromUrl = coordsFromUrl(s.address);
+  if (fromUrl) return fromUrl;
+  const addr = /^https?:\/\//i.test(s.address || '') ? '' : (s.address || '').trim();
+  const tries = [...new Set([addr, [s.name, s.area].filter(Boolean).join(' '), s.name].filter(Boolean))];
+  for (const q of tries) {
+    const c = await geocodeQuery(q);
+    if (c) return c;
+  }
+  return null;
+}
+const geoQueue = [];
+let geoRunning = false, geoDone = 0, geoTotal = 0;
+function queueGeocode(ids) {
+  for (const id of ids) if (!geoQueue.includes(id)) { geoQueue.push(id); geoTotal++; }
+  if (!geoRunning) runGeoQueue();
+  updateGeoBar();
+}
+async function runGeoQueue() {
+  geoRunning = true;
+  while (geoQueue.length) {
+    const id = geoQueue.shift();
+    const s = shops.find(x => x.id === id);
+    if (s && !hasCoord(s)) {
+      const c = await geocodeShop(s);
+      const cur = shops.find(x => x.id === id); // 期間可能被編輯過
+      if (cur && !hasCoord(cur)) {
+        if (c) { cur.lat = c.lat; cur.lng = c.lng; cur.geoFailed = false; }
+        else cur.geoFailed = true;
+        await put(cur);
+      }
+    }
+    geoDone++;
+    updateGeoBar();
+    if (viewMode === 'map') renderMap();
+  }
+  geoRunning = false; geoDone = 0; geoTotal = 0;
+  updateGeoBar();
+}
+$('#geocodeBtn').addEventListener('click', async () => {
+  const s = { name: form.name.value.trim(), area: form.area.value.trim(), address: form.address.value.trim() };
+  if (!s.name && !s.address) { toast('先填店名或地址'); return; }
+  const btn = $('#geocodeBtn');
+  btn.disabled = true; btn.textContent = '定位中…';
+  const c = await geocodeShop(s);
+  btn.disabled = false; btn.textContent = '自動定位';
+  if (c) { setLoc(c.lat, c.lng); toast('已找到位置，可按「在地圖上選」確認'); }
+  else toast('找不到，請改用「在地圖上選」或補上地址');
+});
+
+/* ---------- 地圖 ---------- */
+const TILE_URL = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+const TILE_ATTR = '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>';
+const TAIPEI = [25.0418, 121.5436];
+let map = null, markerLayer = null, meMarker = null, fittedOnce = false;
+
+function pinIcon(cls, emoji) {
+  return L.divIcon({ className: '', html: `<div class="pin ${cls}"><span>${emoji}</span></div>`, iconSize: [26, 26], iconAnchor: [13, 26], popupAnchor: [0, -24] });
+}
+function ensureMap() {
+  if (map || typeof L === 'undefined') return;
+  map = L.map('map', { zoomControl: false }).setView(TAIPEI, 12);
+  L.tileLayer(TILE_URL, { attribution: TILE_ATTR, maxZoom: 19, subdomains: 'abcd' }).addTo(map);
+  markerLayer = L.layerGroup().addTo(map);
+  map.on('popupopen', e => {
+    const el = e.popup.getElement();
+    const b = el && el.querySelector('[data-edit]');
+    if (b) b.onclick = () => openEditor(shops.find(x => x.id === b.dataset.edit));
+  });
+}
+function filteredForMap() {
+  const q = $('#search').value.trim().toLowerCase();
+  return shops.filter(s => (filter === 'all' || s.status === filter) &&
+    (!q || [s.name, s.area, s.address, s.notes, s.sourceUrl, ...(s.tags || [])].join(' ').toLowerCase().includes(q)));
+}
+function renderMap() {
+  ensureMap();
+  if (!map) return;
+  markerLayer.clearLayers();
+  const items = filteredForMap();
+  const pts = [];
+  for (const s of items) {
+    if (!hasCoord(s)) continue;
+    const visited = s.status === 'visited';
+    const stars = visited && s.rating ? `<div class="star-line">${'★'.repeat(s.rating)}${'☆'.repeat(5 - s.rating)}</div>` : '';
+    const html = `<div class="pop">
+      ${s.photo ? `<img src="${s.photo}" alt="">` : ''}
+      <h3>${esc(s.name)}</h3>
+      <div class="meta">${esc([s.area, visited ? '去過' : '想去', s.price ? `約 $${s.price}` : ''].filter(Boolean).join(' · '))}</div>
+      ${stars}
+      <div class="pop-actions">
+        <a href="${esc(mapUrl(s))}" target="_blank" rel="noopener">📍 Google 地圖</a>
+        ${s.sourceUrl ? `<a href="${esc(s.sourceUrl)}" target="_blank" rel="noopener">${isInstagram(s.sourceUrl) ? '📷 IG' : '🔗 來源'}</a>` : ''}
+        <button type="button" data-edit="${esc(s.id)}">✏️ 編輯</button>
+      </div></div>`;
+    L.marker([s.lat, s.lng], { icon: pinIcon(visited ? 'visited' : 'want', visited ? '☕' : '♡') })
+      .bindPopup(html, { maxWidth: 240, minWidth: 180 }).addTo(markerLayer);
+    pts.push([s.lat, s.lng]);
+  }
+  if (!fittedOnce && pts.length) {
+    map.fitBounds(pts, { padding: [40, 40], maxZoom: 15 });
+    fittedOnce = true;
+  }
+  updateGeoBar();
+}
+function updateGeoBar() {
+  const bar = $('#geoBar');
+  if (!bar) return;
+  if (viewMode !== 'map') { bar.hidden = true; return; }
+  const items = filteredForMap();
+  const missing = items.filter(s => !hasCoord(s));
+  const failed = missing.filter(s => s.geoFailed);
+  if (geoRunning) {
+    bar.hidden = false;
+    bar.textContent = `正在定位店家… ${geoDone}/${geoTotal}`;
+  } else if (failed.length) {
+    bar.hidden = false;
+    bar.innerHTML = `${failed.length} 家找不到位置，點店名手動設定：` +
+      failed.slice(0, 8).map(s => `<button type="button" data-fix="${esc(s.id)}">${esc(s.name)}</button>`).join('、') +
+      (failed.length > 8 ? '…' : '');
+    bar.querySelectorAll('[data-fix]').forEach(b => (b.onclick = () => openEditor(shops.find(x => x.id === b.dataset.fix))));
+  } else {
+    bar.hidden = true;
+  }
+}
+function setView(mode) {
+  viewMode = mode;
+  const isMap = mode === 'map';
+  document.body.classList.toggle('map-mode', isMap);
+  $('#mapView').hidden = !isMap;
+  listEl.hidden = isMap;
+  $('#empty').hidden = isMap || shops.length > 0;
+  $('#sort').hidden = isMap;
+  $('#viewBtn').textContent = isMap ? '📃 清單' : '🗺️ 地圖';
+  if (isMap) {
+    document.documentElement.style.setProperty('--header-h', $('.top').offsetHeight + 'px');
+    ensureMap();
+    setTimeout(() => { map && map.invalidateSize(); renderMap(); }, 0);
+    const missing = shops.filter(s => !hasCoord(s) && !s.geoFailed).map(s => s.id);
+    if (missing.length) queueGeocode(missing);
+  } else {
+    render();
+  }
+  updateGeoBar();
+}
+$('#viewBtn').addEventListener('click', () => setView(viewMode === 'map' ? 'list' : 'map'));
+window.addEventListener('resize', () => {
+  if (viewMode === 'map') {
+    document.documentElement.style.setProperty('--header-h', $('.top').offsetHeight + 'px');
+    map && map.invalidateSize();
+  }
+});
+$('#locateBtn').addEventListener('click', () => {
+  if (!navigator.geolocation) { toast('這台裝置不支援定位'); return; }
+  navigator.geolocation.getCurrentPosition(pos => {
+    const ll = [pos.coords.latitude, pos.coords.longitude];
+    if (!meMarker) meMarker = L.marker(ll, { icon: L.divIcon({ className: '', html: '<div class="me-dot"></div>', iconSize: [16, 16] }) }).addTo(map);
+    else meMarker.setLatLng(ll);
+    map.setView(ll, 15);
+  }, () => toast('無法取得位置，請到設定允許定位'), { enableHighAccuracy: true, timeout: 10000 });
+});
+
+/* ---------- 在地圖上選位置 ---------- */
+const picker = $('#picker');
+let pickMap = null, pickMarker = null, pickLL = null;
+$('#pickLocBtn').addEventListener('click', () => {
+  picker.showModal();
+  if (!pickMap) {
+    pickMap = L.map('pickMap').setView(TAIPEI, 13);
+    L.tileLayer(TILE_URL, { attribution: TILE_ATTR, maxZoom: 19, subdomains: 'abcd' }).addTo(pickMap);
+    pickMap.on('click', e => placePick(e.latlng.lat, e.latlng.lng));
+  }
+  setTimeout(() => {
+    pickMap.invalidateSize();
+    if (currentLat != null) { placePick(currentLat, currentLng); pickMap.setView([currentLat, currentLng], 16); }
+    else {
+      pickLL = null; if (pickMarker) { pickMarker.remove(); pickMarker = null; }
+      const withLoc = shops.filter(hasCoord);
+      if (withLoc.length) pickMap.setView([withLoc[0].lat, withLoc[0].lng], 13);
+    }
+  }, 50);
+});
+function placePick(lat, lng) {
+  pickLL = { lat, lng };
+  if (!pickMarker) pickMarker = L.marker([lat, lng], { icon: pinIcon('pick', '📍'), draggable: true }).addTo(pickMap);
+  else pickMarker.setLatLng([lat, lng]);
+  pickMarker.off('dragend').on('dragend', () => { const p = pickMarker.getLatLng(); pickLL = { lat: p.lat, lng: p.lng }; });
+}
+$('#pickCancel').addEventListener('click', () => picker.close());
+$('#pickOk').addEventListener('click', () => {
+  if (!pickLL) { toast('先點地圖放一個圖釘'); return; }
+  setLoc(pickLL.lat, pickLL.lng);
+  picker.close();
 });
 
 /* ---------- Boot ---------- */

@@ -12,6 +12,7 @@
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
   <link rel="icon" href="icons/icon-192.png">
+  <link rel="stylesheet" href="vendor/leaflet/leaflet.css">
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -20,6 +21,7 @@
       <h1>下午茶筆記</h1>
       <div class="head-actions">
         <button class="chip-btn" id="pasteBtn" aria-label="從剪貼簿新增">📋 貼上</button>
+        <button class="chip-btn" id="viewBtn" aria-label="切換地圖">🗺️ 地圖</button>
         <button class="icon-btn" id="menuBtn" aria-label="選單">⋯</button>
       </div>
     </div>
@@ -37,6 +39,11 @@
   </header>
 
   <main id="list" class="list"></main>
+  <section id="mapView" class="map-view" hidden>
+    <div id="map"></div>
+    <div id="geoBar" class="geo-bar" hidden></div>
+    <button class="map-btn" id="locateBtn" aria-label="我的位置">◎</button>
+  </section>
   <p id="empty" class="empty" hidden>還沒有紀錄<br>按右下角 ＋ 新增第一家店</p>
 
   <button class="fab" id="addBtn" aria-label="新增">＋</button>
@@ -66,6 +73,11 @@
             <button type="button" class="chip-btn" id="openMapBtn" aria-label="在地圖開啟">📍</button>
           </span>
         </label>
+        <div class="loc-row">
+          <span id="locStatus" class="loc-status">位置：未設定</span>
+          <button type="button" class="chip-btn" id="geocodeBtn">自動定位</button>
+          <button type="button" class="chip-btn" id="pickLocBtn">在地圖上選</button>
+        </div>
         <label>IG／來源連結
           <span class="input-row">
             <input name="sourceUrl" type="url" inputmode="url" placeholder="https://www.instagram.com/p/…" maxlength="500">
@@ -93,6 +105,16 @@
     </form>
   </dialog>
 
+  <!-- 在地圖上選位置 -->
+  <dialog id="picker" class="sheet">
+    <div class="sheet-head">
+      <button type="button" class="link" id="pickCancel">取消</button>
+      <strong>點地圖設定位置</strong>
+      <button type="button" class="link strong" id="pickOk">使用</button>
+    </div>
+    <div id="pickMap" class="pick-map"></div>
+  </dialog>
+
   <!-- 選單 -->
   <dialog id="menu" class="sheet small-sheet">
     <div class="sheet-head">
@@ -104,6 +126,7 @@
       <p class="hint">裝好後，在 IG 或 Google 地圖按「分享 → 加到下午茶」就能收藏。</p>
       <label class="menu-item">📥 匯入捷徑收件匣（teatime-inbox.txt）<input type="file" id="inboxInput" accept=".txt,text/plain" hidden></label>
       <p class="hint">用「存到下午茶」捷徑收藏的店會累積在 iCloud 雲碟的 Shortcuts/teatime-inbox.txt，從這裡一次匯入，重複的連結會自動略過。</p>
+      <p class="hint">🗺️ 想同步到 Google 地圖：點店家的「📍 地圖」→ 在 Google 地圖按「儲存」→ 選你的「下午茶」清單。</p>
       <button class="menu-item" id="exportBtn">匯出備份（JSON）</button>
       <label class="menu-item">匯入備份<input type="file" id="importInput" accept="application/json,.json" hidden></label>
       <p class="hint">資料只存在這台裝置的瀏覽器裡。iOS 可能清除很久沒開的網站資料，建議定期匯出備份。</p>
@@ -111,6 +134,7 @@
   </dialog>
 
   <div id="toast" class="toast" hidden></div>
+  <script src="vendor/leaflet/leaflet.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

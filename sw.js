@@ -1,5 +1,5 @@
 // 更新程式後，把版本號 +1，手機重新打開 app 就會抓新版
-const CACHE = 'tea-notes-v11';
+const CACHE = 'tea-notes-v12';
 const ASSETS = [
   './',
   './index.html',
@@ -9,6 +9,8 @@ const ASSETS = [
   './icons/icon-192.png',
   './icons/icon-512.png',
   './icons/apple-touch-icon.png',
+  './vendor/leaflet/leaflet.js',
+  './vendor/leaflet/leaflet.css',
 ];
 
 self.addEventListener('install', e => {
